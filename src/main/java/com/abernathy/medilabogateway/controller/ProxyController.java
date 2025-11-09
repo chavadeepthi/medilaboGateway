@@ -22,6 +22,10 @@ public class ProxyController {
 
     private final RestTemplate restTemplate;
     private final String defaultBackend;
+    @Value("${patients.url}") private String patientsUrl;
+    @Value("${notes.url}") private String notesUrl;
+    @Value("${risk.url}") private String riskUrl;
+    @Value("${frontend.url}") private String frontendUrl;
 
     public ProxyController(RestTemplate restTemplate,
                            @Value("${routing.backendBaseUrl}") String defaultBackend) {
@@ -90,21 +94,12 @@ public class ProxyController {
     }
 
     private String resolveBackendUrl(String forwardPath) {
-//        log.info("Deepthi Forward path ", forwardPath);
-        String backendUrl;
-        if (forwardPath.startsWith("/patients")) {
-            backendUrl = "http://localhost:8081" + forwardPath;
-        } else if (forwardPath.startsWith("/notes")) {
-            backendUrl = "http://localhost:8083" + forwardPath;
-        } else if (forwardPath.startsWith("/risk")) {
-            // Map /risk/... → 8084/assessment/...
-//            String seg = forwardPath.substring("/risk".length());
-            backendUrl = "http://localhost:8084" + forwardPath;
-        } else {
-            backendUrl = "http://localhost:8082" + forwardPath; // default frontend
-        }
-        log.info("Resolved backend URL for forwardPath [{}] → {}", forwardPath, backendUrl);
-        return backendUrl;
+        if (forwardPath.startsWith("/patients")) return patientsUrl + forwardPath;
+        if (forwardPath.startsWith("/notes")) return notesUrl + forwardPath;
+        if (forwardPath.startsWith("/risk")) return riskUrl + forwardPath;
+
+        // Default to frontend
+        return frontendUrl + forwardPath;
     }
 
     private HttpHeaders copyRequestHeaders(HttpServletRequest request) {
