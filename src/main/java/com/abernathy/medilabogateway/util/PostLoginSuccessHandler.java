@@ -4,6 +4,7 @@ package com.abernathy.medilabogateway;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -13,12 +14,13 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Component
 public class PostLoginSuccessHandler implements AuthenticationSuccessHandler {
 
-    private final JwtUtil jwtUtil;
+    private final com.abernathy.medilabogateway.JwtUtil jwtUtil;
 
-    public PostLoginSuccessHandler(JwtUtil jwtUtil) {
+    public PostLoginSuccessHandler(com.abernathy.medilabogateway.JwtUtil jwtUtil) {
         this.jwtUtil = jwtUtil;
     }
 
@@ -40,5 +42,6 @@ public class PostLoginSuccessHandler implements AuthenticationSuccessHandler {
 
         // redirect to root (or frontend)
         response.sendRedirect("/");
+        log.info("Generated JWT={} for user={}", jwt, username);
     }
 }
