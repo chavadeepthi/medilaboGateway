@@ -3,8 +3,6 @@ package com.abernathy.medilabogateway.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -14,20 +12,19 @@ import org.springframework.web.client.RestTemplate;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
-import java.util.stream.Collectors;
 
 @Slf4j
 @RestController
 @RequestMapping("/api/proxy")
 public class ProxyController {
 
-    private static final Logger log = LoggerFactory.getLogger(ProxyController.class);
-
     private final RestTemplate restTemplate;
     private final String defaultBackend;
 
-    public ProxyController(RestTemplate restTemplate, @Value("${routing.backendBaseUrl}") String defaultBackend) {
+    public ProxyController(RestTemplate restTemplate,
+                           @Value("${routing.backendBaseUrl}") String defaultBackend) {
         this.restTemplate = restTemplate;
         this.defaultBackend = defaultBackend;
     }
@@ -35,34 +32,39 @@ public class ProxyController {
     @RequestMapping("/**")
     public ResponseEntity<byte[]> proxy(HttpServletRequest request,
                                         @RequestBody(required = false) byte[] body) {
-
-        // Log incoming request
+        // Log basic incoming details
         log.info("Incoming request to gateway: URI={}, SessionId={}, Cookies={}",
                 request.getRequestURI(),
-                request.getSession(false) != null ? request.getSession(false).getId() : "no‑session",
-                request.getCookies() != null ?
+                (request.getSession(false) != null ? request.getSession(false).getId() : "no-session"),
+                (request.getCookies() != null ?
                         Arrays.stream(request.getCookies())
-                                .map(c -> c.getName() + "=" + c.getValue())
-                                .collect(Collectors.joining(","))
-                        : "no‑cookies");
+                                .map(c -> c.getName()+"="+c.getValue())
+                                .reduce((a,b) -> a + "," + b)
+                                .orElse("") : "no-cookies"));
 
         String forwardPath = extractForwardPath(request);
         String query = request.getQueryString();
         String backendUrl = resolveBackendUrl(forwardPath) + (query != null ? "?" + query : "");
 
-
-
         log.info("Computed routing: forwardPath={}, query={}, backendUrl={}",
                 forwardPath, query, backendUrl);
 
         HttpHeaders headers = copyRequestHeaders(request);
-        addJwtFromSession(request.getSession(false), headers);
-        HttpMethod method = resolveHttpMethod(request.getMethod());
-        HttpEntity<byte[]> entity = new HttpEntity<>(body, headers);
+        if ("POST".equalsIgnoreCase(request.getMethod()) || "PUT".equalsIgnoreCase(request.getMethod())) {
+            headers.setContentType(MediaType.APPLICATION_JSON);
+        }
+        // Log before adding JWT
+        HttpSession session = request.getSession(false);
+        Object jwtObj = (session != null ? session.getAttribute("JWT") : null);
+        log.info("Session attribute JWT={}", jwtObj);
+        addJwtFromSession(session, headers);
 
         log.info("Headers forwarded to backend: Authorization={}, CookiesHeader={}",
                 headers.getFirst(HttpHeaders.AUTHORIZATION),
                 headers.get(HttpHeaders.COOKIE));
+
+        HttpMethod method = resolveHttpMethod(request.getMethod());
+        HttpEntity<byte[]> entity = new HttpEntity<>(body, headers);
 
         try {
             ResponseEntity<byte[]> resp = restTemplate.exchange(URI.create(backendUrl), method, entity, byte[].class);
@@ -74,8 +76,7 @@ public class ProxyController {
         } catch (RestClientException ex) {
             log.error("Error proxying request to backend. backendUrl={}, error={}", backendUrl, ex.getMessage());
             byte[] msg = ex.getMessage() != null ?
-                    ex.getMessage().getBytes(StandardCharsets.UTF_8) :
-                    new byte[0];
+                    ex.getMessage().getBytes(StandardCharsets.UTF_8) : new byte[0];
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(msg);
         }
     }
@@ -87,19 +88,20 @@ public class ProxyController {
         log.info("Extracted forwardPath = {}", forwardPath);
         return forwardPath;
     }
+
     private String resolveBackendUrl(String forwardPath) {
+//        log.info("Deepthi Forward path ", forwardPath);
         String backendUrl;
         if (forwardPath.startsWith("/patients")) {
             backendUrl = "http://localhost:8081" + forwardPath;
-        } else if (forwardPath.startsWith("/api/notes") || forwardPath.startsWith("/notes")) {
+        } else if (forwardPath.startsWith("/notes")) {
             backendUrl = "http://localhost:8083" + forwardPath;
-        }  else if (forwardPath.startsWith("/risk")) {
-        String seg = forwardPath.substring("/risk".length());
-        return "http://localhost:8084/assessment" + seg;
-    } else if (forwardPath.startsWith("/assessment")) {
-        return "http://localhost:8084" + forwardPath;
-    } else {
-            backendUrl = "http://localhost:8082" + forwardPath; // default to frontend
+        } else if (forwardPath.startsWith("/risk")) {
+            // Map /risk/... → 8084/assessment/...
+//            String seg = forwardPath.substring("/risk".length());
+            backendUrl = "http://localhost:8084" + forwardPath;
+        } else {
+            backendUrl = "http://localhost:8082" + forwardPath; // default frontend
         }
         log.info("Resolved backend URL for forwardPath [{}] → {}", forwardPath, backendUrl);
         return backendUrl;
@@ -122,11 +124,8 @@ public class ProxyController {
     private void addJwtFromSession(HttpSession session, HttpHeaders headers) {
         if (session != null) {
             Object jwt = session.getAttribute("JWT");
-            log.info("Session attribute JWT={}", jwt);
             if (jwt instanceof String) {
                 headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + jwt);
-            }else {
-                log.info("No session available, cannot add JWT header");
             }
         }
     }

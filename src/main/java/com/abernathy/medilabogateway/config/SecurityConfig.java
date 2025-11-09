@@ -34,7 +34,9 @@ public class SecurityConfig {
                 .csrf().disable() // disable CSRF for simplicity
                 .authorizeHttpRequests()
                 .requestMatchers("/login", "/error").permitAll()
+                .requestMatchers("/api/proxy/risk/**").permitAll()
                 .requestMatchers("/api/proxy/**").authenticated()
+
                 .anyRequest().authenticated()
                 .and()
                 .formLogin()
