@@ -1,5 +1,6 @@
 package com.abernathy.medilabogateway.controller;
 
+import com.abernathy.medilabogateway.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
@@ -11,9 +12,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Enumeration;
+import java.util.*;
 
 @Slf4j
 @RestController
@@ -22,15 +21,17 @@ public class ProxyController {
 
     private final RestTemplate restTemplate;
     private final String defaultBackend;
+    private final JwtUtil jwtUtil;
     @Value("${patients.url}") private String patientsUrl;
     @Value("${notes.url}") private String notesUrl;
     @Value("${risk.url}") private String riskUrl;
     @Value("${frontend.url}") private String frontendUrl;
 
     public ProxyController(RestTemplate restTemplate,
-                           @Value("${routing.backendBaseUrl}") String defaultBackend) {
+                           @Value("${routing.backendBaseUrl}") String defaultBackend, JwtUtil jwtUtil) {
         this.restTemplate = restTemplate;
         this.defaultBackend = defaultBackend;
+        this.jwtUtil = jwtUtil;
     }
 
     @RequestMapping("/**")
@@ -61,7 +62,15 @@ public class ProxyController {
         HttpSession session = request.getSession(false);
         Object jwtObj = (session != null ? session.getAttribute("JWT") : null);
         log.info("Session attribute JWT={}", jwtObj);
-        addJwtFromSession(session, headers);
+        if (session != null && session.getAttribute("JWT") != null) {
+            // Forward the user's JWT
+            String userJwt = (String) session.getAttribute("JWT");
+            headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + userJwt);
+            log.info("Forwarding USER JWT to backend: {}", userJwt);
+        } else {
+            // fallback for internal calls
+            addServiceJwt(headers);
+        }
 
         log.info("Headers forwarded to backend: Authorization={}, CookiesHeader={}",
                 headers.getFirst(HttpHeaders.AUTHORIZATION),
@@ -123,6 +132,15 @@ public class ProxyController {
                 headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + jwt);
             }
         }
+    }
+    private void addServiceJwt(HttpHeaders headers) {
+        String token = jwtUtil.generateToken(
+                "gateway",                          // subject
+                List.of("SERVICE"),                 // roles
+                Map.of("scope", "internal-call")    // additional claims
+        );
+
+        headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);
     }
 
     private HttpMethod resolveHttpMethod(String methodName) {
